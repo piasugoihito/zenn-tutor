@@ -113,6 +113,52 @@ npm run tauri dev     # 開発モード
 npm run tauri build   # 配布用ビルド（src-tauri/target/release/bundle/ に出力）
 ```
 
+### Windows（exe / msi）
+
+Windows 版は Windows 実機でビルドします（macOS からのクロスビルドは Tauri では実験的扱いのため使いません）。
+
+必要なもの:
+
+1. [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) — インストーラーで「C++ によるデスクトップ開発」を選択
+2. WebView2 ランタイム — Windows 10（1803 以降）/ 11 には標準で入っています
+3. [Rust](https://rustup.rs/) — 既定の `x86_64-pc-windows-msvc` ツールチェーンのままで OK
+4. Node.js 20 以上、Git
+
+PowerShell で:
+
+```powershell
+git clone https://github.com/piasugoihito/zenn-tutor.git
+cd zenn-tutor
+npm ci
+
+npm run tauri dev                          # まず開発モードで動作確認
+npm run tauri build                        # インストーラー（NSIS の exe と MSI）を作成
+npm run tauri build -- --bundles nsis      # exe インストーラーだけ作る場合
+```
+
+出力先:
+
+| 種類 | パス |
+| --- | --- |
+| インストーラー（exe） | `src-tauri\target\release\bundle\nsis\ZennTutor_x.y.z_x64-setup.exe` |
+| インストーラー（msi） | `src-tauri\target\release\bundle\msi\ZennTutor_x.y.z_x64_en-US.msi` |
+| 実行ファイル単体 | `src-tauri\target\release\zenn-tutor.exe`（WebView2 がある環境ならそのまま起動可） |
+
+補足:
+
+- 未署名のため、初回起動時に SmartScreen の「Windows によって PC が保護されました」が表示されます。「詳細情報」→「実行」で起動できます。
+- MSI の作成に失敗する場合は、Windows の「オプション機能」で **VBSCRIPT** を有効にするか、`--bundles nsis` で exe だけを作成してください。
+- 自動起動（ログイン時にトレイ常駐）はリリースビルドでのみ登録されます。`tauri dev` では登録されません。
+
+Windows 実機で確認すること:
+
+- [ ] `cargo test`（`src-tauri` で実行）が通る
+- [ ] トレイアイコンが表示され、左クリックでウィンドウが開く／メニューの「今すぐスカウト」「終了」が動く
+- [ ] ウィンドウを閉じてもトレイに常駐する
+- [ ] 設定の「自動起動」ON で、再ログイン後にウィンドウを出さずトレイ常駐で起動する（インストール版で確認）
+- [ ] 二重起動すると既存のウィンドウが前面に出る
+- [ ] データが `%APPDATA%\dev.zenntutor.app\zenntutor.sqlite3` に保存される
+
 ### Android（APK）
 
 必要なもの: Android Studio（SDK / NDK / 付属の JDK）、Rust の Android ターゲット
