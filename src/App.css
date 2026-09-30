@@ -601,3 +601,107 @@ textarea {
 .preview li {
   margin-bottom: 8px;
 }
+
+/* ---------- mobile ---------- */
+
+@media (max-width: 720px) {
+  .app {
+    flex-direction: column-reverse;
+    height: 100dvh;
+  }
+  .sidebar {
+    width: 100%;
+    flex-direction: row;
+    padding: 0 0 env(safe-area-inset-bottom);
+    border-right: none;
+    border-top: 1px solid var(--border);
+    gap: 0;
+  }
+  .brand,
+  .sidebar-status {
+    display: none;
+  }
+  .sidebar nav {
+    flex-direction: row;
+    width: 100%;
+  }
+  .nav-item {
+    flex: 1;
+    justify-content: center;
+    gap: 4px;
+    font-size: 13px;
+    padding: 12px 4px;
+    border-radius: 0;
+  }
+  .main {
+    padding-top: env(safe-area-inset-top);
+  }
+  .page {
+    padding: 20px 16px 32px;
+  }
+  .pick-card,
+  .placeholder,
+  .backlog {
+    padding: 18px;
+  }
+  .pick-title {
+    font-size: 18px;
+  }
+  .actions {
+    flex-wrap: wrap;
+  }
+
+  .session {
+    flex-direction: column;
+  }
+  .session-side {
+    width: 100%;
+    max-height: 32vh;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: 12px 16px;
+    gap: 8px;
+  }
+  .session-side .bridge,
+  .howto {
+    display: none;
+  }
+  .chat {
+    min-height: 0;
+  }
+  .chat-log {
+    padding: 16px 12px;
+  }
+  .msg {
+    max-width: 92%;
+  }
+  .composer {
+    padding: 8px 12px 10px;
+  }
+  .composer-input textarea {
+    font-size: 16px; /* iOS/Android のフォーカス時ズームを防ぐ */
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  .settings .row {
+    flex-wrap: wrap;
+  }
+  .list-row {
+    flex-wrap: wrap;
+    gap: 4px 10px;
+  }
+  .list-row .grow {
+    flex-basis: 100%;
+    order: 3;
+  }
+}
+
+.android .app {
+  padding-top: 32px;
+  background: var(--bg);
+}
+.android .sidebar {
+  padding-bottom: 20px;
+}

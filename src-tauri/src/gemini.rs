@@ -8,6 +8,7 @@ const BASE: &str = "https://generativelanguage.googleapis.com/v1beta";
 #[derive(Debug)]
 pub enum GeminiError {
     /// 無料枠のレート制限（HTTP 429）
+    #[allow(dead_code)]
     RateLimited(String),
     Api(String),
     Network(String),
@@ -82,19 +83,33 @@ impl Gemini {
         });
 
         let url = format!("{BASE}/models/{}:generateContent", self.model);
-        let res = self
-            .client
-            .post(url)
-            .header("x-goog-api-key", &self.api_key)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| GeminiError::Network(e.to_string()))?;
-
-        let status = res.status();
-        let text = res.text().await.map_err(|e| GeminiError::Network(e.to_string()))?;
+        // 一時的な混雑（500/503）は間隔を空けて最大2回まで再試行
+        let mut attempt = 0;
+        let (status, text) = loop {
+            let res = self
+                .client
+                .post(&url)
+                .header("x-goog-api-key", &self.api_key)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| GeminiError::Network(e.to_string()))?;
+            let status = res.status();
+            let text = res.text().await.map_err(|e| GeminiError::Network(e.to_string()))?;
+            if matches!(status.as_u16(), 500 | 503) && attempt < 2 {
+                attempt += 1;
+                tokio::time::sleep(std::time::Duration::from_secs(3 * attempt)).await;
+                continue;
+            }
+            break (status, text);
+        };
         if status.as_u16() == 429 {
             return Err(GeminiError::RateLimited(text));
+        }
+        if status.as_u16() == 503 {
+            return Err(GeminiError::Api(
+                "Gemini が混雑しています（503）。少し時間をおいて再試行してください。".into(),
+            ));
         }
         if !status.is_success() {
             let msg = serde_json::from_str::<serde_json::Value>(&text)

@@ -63,28 +63,30 @@ pub async fn send(db: &Db, pick_id: i64, text: &str) -> Result<Vec<Message>, Str
     if text.is_empty() {
         return Err("メッセージが空です".into());
     }
-    let (gemini, pick, mut msgs, understood) = context(db, pick_id)?;
-    // ユーザー発言は API 失敗時も失われないよう先に保存する
+    // ユーザー発言は API 失敗時も失われないよう先に保存する（失敗時は reply で再生成できる）
     {
         let conn = db.lock().unwrap();
+        db::get_pick(&conn, pick_id).map_err(|e| e.to_string())?.ok_or("記事が見つかりません")?;
         db::add_message(&conn, pick_id, "user", "chat", text).map_err(|e| e.to_string())?;
-        if pick.status == "ready" {
-            db::set_pick_status(&conn, pick_id, "in_progress").map_err(|e| e.to_string())?;
-        }
     }
-    msgs.push(Message {
-        id: 0,
-        role: "user".into(),
-        kind: "chat".into(),
-        content: text.into(),
-        created_at: String::new(),
-    });
+    reply(db, pick_id).await
+}
+
+/// 直近のユーザー発言に対する AI の応答を生成する
+pub async fn reply(db: &Db, pick_id: i64) -> Result<Vec<Message>, String> {
+    let (gemini, pick, msgs, understood) = context(db, pick_id)?;
+    if msgs.last().map(|m| m.role.as_str()) != Some("user") {
+        return Ok(msgs);
+    }
     let reply = gemini
         .generate(&prompts::tutor_system(&pick, &understood), &to_turns(&msgs), false, 0.7)
         .await
         .map_err(|e| e.to_string())?;
     let conn = db.lock().unwrap();
     db::add_message(&conn, pick_id, "model", "chat", &reply).map_err(|e| e.to_string())?;
+    if pick.status == "ready" {
+        db::set_pick_status(&conn, pick_id, "in_progress").map_err(|e| e.to_string())?;
+    }
     db::list_messages(&conn, pick_id).map_err(|e| e.to_string())
 }
 
@@ -115,10 +117,6 @@ pub async fn submit_summary(db: &Db, pick_id: i64, summary: &str) -> Result<Verd
         return Err("まとめが空です".into());
     }
     let (gemini, pick, _msgs, _) = context(db, pick_id)?;
-    {
-        let conn = db.lock().unwrap();
-        db::add_message(&conn, pick_id, "user", "summary", summary).map_err(|e| e.to_string())?;
-    }
     let mut verdict: Verdict = gemini
         .generate_json(
             &prompts::judge_system(&pick),
@@ -133,6 +131,7 @@ pub async fn submit_summary(db: &Db, pick_id: i64, summary: &str) -> Result<Verd
 
     let conn = db.lock().unwrap();
     let label = if verdict.passed { "✅ パス" } else { "🔁 もう一歩" };
+    db::add_message(&conn, pick_id, "user", "summary", summary).map_err(|e| e.to_string())?;
     db::add_message(&conn, pick_id, "model", "verdict", &format!("{label}\n\n{}", verdict.feedback))
         .map_err(|e| e.to_string())?;
     db::add_memo(&conn, pick_id, &verdict.concept, summary, &verdict.feedback, verdict.passed)

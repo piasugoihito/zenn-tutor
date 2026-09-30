@@ -82,6 +82,7 @@ export const api = {
   memos: () => invoke<Memo[]>("list_memos"),
   startChat: (pickId: number) => invoke<Message[]>("start_chat", { pickId }),
   send: (pickId: number, text: string) => invoke<Message[]>("send_message", { pickId, text }),
+  retryReply: (pickId: number) => invoke<Message[]>("retry_reply", { pickId }),
   submitSummary: (pickId: number, summary: string) =>
     invoke<Verdict>("submit_summary", { pickId, summary }),
   settings: () => invoke<Settings>("get_settings"),

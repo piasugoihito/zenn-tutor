@@ -1,6 +1,6 @@
 # ZennTutor
 
-**毎朝 Zenn から「今日のあなたに効く1本」だけを厳選し、AI チューターとの対話で理解まで導くデスクトップアプリ。**
+**毎朝 Zenn から「今日のあなたに効く1本」だけを厳選し、AI チューターとの対話で理解まで導く学習アプリ（macOS / Android）。**
 
 情報過多な技術記事を「多読」するのをやめ、1日15〜20分の対話で1つの概念を自分の言葉にする——そのための学習基盤です。
 
@@ -34,7 +34,7 @@ Zenn トピック別 RSS ──▶ 1次選抜（ルールベース・API呼び�
 
 | レイヤー | 採用技術 |
 | --- | --- |
-| 実行基盤 | Tauri 2（Rust + React / Vite / TypeScript） |
+| 実行基盤 | Tauri 2（Rust + React / Vite / TypeScript）。デスクトップと Android で同じコードを使用 |
 | スケジューリング | アプリ内タイマー（5分ごとに「日付が変わり規定時刻を過ぎたか」を確認） |
 | LLM | Gemini API（既定: `gemini-3.6-flash`） |
 | 永続化 | ローカル SQLite（既読記事・対話ログ・理解メモ） |
@@ -46,11 +46,23 @@ Zenn トピック別 RSS ──▶ 1次選抜（ルールベース・API呼び�
 | OS | ファイル |
 | --- | --- |
 | macOS（Apple Silicon） | `ZennTutor_x.y.z_aarch64.dmg` |
+| Android（8.0 以降 / arm64・armv7） | `ZennTutor_x.y.z_android.apk` |
 
 > **macOS で「開発元を検証できません」と表示される場合**
 > 未署名のビルドでは macOS の警告が出ます。アプリケーションフォルダへコピーしたあと、次のどちらかを行ってください。
 > - Finder で ZennTutor を右クリックし「開く」を選ぶ
 > - ターミナルで `xattr -cr /Applications/ZennTutor.app` を実行する
+
+> **Android でインストールする場合**
+> Google Play 以外からの配布なので、APK を開くと「提供元不明のアプリ」の許可を求められます。ブラウザ（またはファイルアプリ）にインストールを許可してから進めてください。
+
+### Android 版とデスクトップ版の違い
+
+| | デスクトップ | Android |
+| --- | --- | --- |
+| 自動スカウト | ログイン時に起動してトレイに常駐し、裏側で実行 | アプリを開いている間にタイマーが動作し、開いた時点で当日分を用意 |
+| トレイ常駐・自動起動 | あり | なし（OS の制約のため） |
+| データ | 端末ごとに独立（同期なし） | 同左 |
 
 ## はじめかた
 
@@ -93,13 +105,39 @@ API キーは環境変数 `GEMINI_API_KEY` でも指定できます。環境変�
 必要なもの: [Rust](https://rustup.rs/)、Node.js 20 以上、[Tauri の OS 別前提条件](https://tauri.app/start/prerequisites/)
 
 ```bash
-git clone https://github.com/<your-name>/zenn-tutor.git
+git clone https://github.com/piasugoihito/zenn-tutor.git
 cd zenn-tutor
 npm install
 
 npm run tauri dev     # 開発モード
 npm run tauri build   # 配布用ビルド（src-tauri/target/release/bundle/ に出力）
 ```
+
+### Android（APK）
+
+必要なもの: Android Studio（SDK / NDK / 付属の JDK）、Rust の Android ターゲット
+
+```bash
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+export NDK_HOME="$ANDROID_HOME/ndk/<version>"
+rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+
+npm run tauri android dev                                         # 実機 / エミュレータで開発
+npm run tauri android build -- --apk --target aarch64 --target armv7   # リリース APK
+# → src-tauri/gen/android/app/build/outputs/apk/universal/release/
+```
+
+リリース署名には `src-tauri/gen/android/keystore.properties` を使います（gitignore 済み。**コミットしないでください**）。
+
+```properties
+storeFile=/absolute/path/to/release.jks
+storePassword=...
+keyAlias=...
+password=...
+```
+
+鍵は `keytool -genkeypair -v -keystore release.jks -alias <alias> -keyalg RSA -keysize 2048 -validity 10000` で作成できます。このファイルがない場合、リリース APK は未署名で出力されるためインストールできません。
 
 テスト（スコアリングのユニットテスト）:
 
@@ -118,8 +156,9 @@ src/                     フロントエンド（React）
   views/History.tsx      履歴
   views/Memos.tsx        理解メモ
   views/Settings.tsx     設定
+src-tauri/gen/android/   Android プロジェクト（tauri android init で生成）
 src-tauri/src/
-  lib.rs                 コマンド・スケジューラ・トレイ・自動起動
+  lib.rs                 コマンド・スケジューラ・トレイ・自動起動（トレイと自動起動はデスクトップのみ）
   scout.rs               RSS 取得・1次選抜スコアリング・2次選抜
   tutor.rs               対話・理解度判定
   prompts.rs             プロファイルとプロンプト
@@ -135,6 +174,7 @@ src-tauri/src/
 | macOS | `~/Library/Application Support/dev.zenntutor.app/zenntutor.sqlite3` |
 | Windows | `%APPDATA%\dev.zenntutor.app\zenntutor.sqlite3` |
 | Linux | `~/.local/share/dev.zenntutor.app/zenntutor.sqlite3` |
+| Android | アプリ内領域（アンインストールで削除） |
 
 アンインストール後にデータも消したい場合は、このフォルダを削除してください。
 

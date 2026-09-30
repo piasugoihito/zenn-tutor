@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::db;
 
-pub const DEFAULT_MODEL: &str = "gemini-2.5-flash";
+pub const DEFAULT_MODEL: &str = "gemini-3.6-flash";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -56,6 +56,10 @@ pub fn load(conn: &Connection) -> Settings {
         .and_then(|v| serde_json::from_str::<Settings>(&v).ok())
         .unwrap_or_default();
     s.has_api_key = api_key(conn).is_some();
+    // サポート終了した旧既定モデルが保存されていれば新しい既定値へ移行
+    if s.model == "gemini-2.5-flash" {
+        s.model = DEFAULT_MODEL.into();
+    }
     s
 }
 

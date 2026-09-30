@@ -9,9 +9,14 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tauri::menu::{Menu, MenuItem};
-use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager};
+#[cfg(desktop)]
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    RunEvent, WindowEvent,
+};
+#[cfg(desktop)]
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 use db::Db;
@@ -22,6 +27,7 @@ const TICK: Duration = Duration::from_secs(5 * 60);
 /// 失敗後の再試行間隔（通常 / レート制限時）
 const RETRY_AFTER: Duration = Duration::from_secs(30 * 60);
 const RETRY_AFTER_RATE_LIMIT: Duration = Duration::from_secs(60 * 60);
+#[cfg(desktop)]
 const HIDDEN_ARG: &str = "--hidden";
 
 #[derive(Default)]
@@ -110,6 +116,7 @@ fn spawn_scheduler(app: AppHandle) {
 
 /// 画面とトレイの状態表示を更新
 fn notify(app: &AppHandle) {
+    #[cfg(desktop)]
     if let Ok(status) = build_status(app) {
         if let Some(tray) = app.tray_by_id("main") {
             let _ = tray.set_tooltip(Some(format!("ZennTutor — {}", status.label)));
@@ -224,6 +231,13 @@ async fn send_message(app: AppHandle, pick_id: i64, text: String) -> Result<Vec<
 }
 
 #[tauri::command]
+async fn retry_reply(app: AppHandle, pick_id: i64) -> Result<Vec<db::Message>, String> {
+    let r = tutor::reply(&app.state::<AppState>().db, pick_id).await;
+    notify(&app);
+    r
+}
+
+#[tauri::command]
 async fn submit_summary(app: AppHandle, pick_id: i64, summary: String) -> Result<tutor::Verdict, String> {
     let r = tutor::submit_summary(&app.state::<AppState>().db, pick_id, &summary).await;
     notify(&app);
@@ -245,7 +259,8 @@ fn save_settings(app: AppHandle, mut new: Settings) -> Result<Settings, String> 
         new.model = settings::DEFAULT_MODEL.into();
     }
     {
-        let conn = app.state::<AppState>().db.lock().unwrap();
+        let state = app.state::<AppState>();
+        let conn = state.db.lock().unwrap();
         settings::save(&conn, &new).map_err(|e| e.to_string())?;
     }
     apply_autostart(&app, new.autostart);
@@ -255,8 +270,9 @@ fn save_settings(app: AppHandle, mut new: Settings) -> Result<Settings, String> 
 
 #[tauri::command]
 fn set_api_key(app: AppHandle, key: String) -> Result<(), String> {
+    let state = app.state::<AppState>();
     {
-        let conn = app.state::<AppState>().db.lock().unwrap();
+        let conn = state.db.lock().unwrap();
         let key = key.trim();
         if key.is_empty() {
             db::delete_setting(&conn, "gemini_api_key")
@@ -265,10 +281,11 @@ fn set_api_key(app: AppHandle, key: String) -> Result<(), String> {
         }
         .map_err(|e| e.to_string())?;
     }
-    let mut sc = app.state::<AppState>().scout.lock().unwrap();
-    sc.last_error = None;
-    sc.last_failure = None;
-    drop(sc);
+    {
+        let mut sc = state.scout.lock().unwrap();
+        sc.last_error = None;
+        sc.last_failure = None;
+    }
     notify(&app);
     Ok(())
 }
@@ -296,6 +313,10 @@ async fn test_api_key(state: tauri::State<'_, AppState>) -> Result<String, Strin
 
 // ---------- 起動・常駐 ----------
 
+#[cfg(mobile)]
+fn apply_autostart(_app: &AppHandle, _enabled: bool) {}
+
+#[cfg(desktop)]
 fn apply_autostart(app: &AppHandle, enabled: bool) {
     // 開発ビルドの実行ファイルをログイン項目に登録しないよう、リリースビルドのみで反映
     if cfg!(debug_assertions) {
@@ -313,6 +334,7 @@ fn apply_autostart(app: &AppHandle, enabled: bool) {
     }
 }
 
+#[cfg(desktop)]
 fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -321,6 +343,7 @@ fn show_main(app: &AppHandle) {
     }
 }
 
+#[cfg(desktop)]
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "ZennTutor を開く", true, None::<&str>)?;
     let scout_item = MenuItem::with_id(app, "scout", "今すぐスカウト", true, None::<&str>)?;
@@ -353,10 +376,21 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = builder
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![HIDDEN_ARG])))
+        .on_window_event(|window, event| {
+            // ウィンドウを閉じても終了せずトレイに常駐
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        });
+
+    let app = builder
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
@@ -365,24 +399,18 @@ pub fn run() {
             app.manage(AppState { db: Arc::new(Mutex::new(conn)), scout: Mutex::default() });
 
             let handle = app.handle().clone();
-            setup_tray(&handle)?;
             apply_autostart(&handle, autostart);
-
-            // OS ログイン時の自動起動ではウィンドウを出さずトレイに常駐
-            if std::env::args().any(|a| a == HIDDEN_ARG) {
-                if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.hide();
+            #[cfg(desktop)]
+            {
+                setup_tray(&handle)?;
+                // OS ログイン時の自動起動ではウィンドウを出さずトレイに常駐
+                if !std::env::args().any(|a| a == HIDDEN_ARG) {
+                    show_main(&handle);
                 }
             }
+            // モバイルではアプリ起動中のみタイマーが動く（開いた時点で当日分を用意）
             spawn_scheduler(handle);
             Ok(())
-        })
-        .on_window_event(|window, event| {
-            // ウィンドウを閉じても終了せずトレイに常駐
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
-            }
         })
         .invoke_handler(tauri::generate_handler![
             get_status,
@@ -394,6 +422,7 @@ pub fn run() {
             list_memos,
             start_chat,
             send_message,
+            retry_reply,
             submit_summary,
             get_settings,
             save_settings,
@@ -403,11 +432,10 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|app, event| {
+    app.run(|_app, _event| {
         #[cfg(target_os = "macos")]
-        if let RunEvent::Reopen { .. } = event {
-            show_main(app);
+        if let RunEvent::Reopen { .. } = _event {
+            show_main(_app);
         }
-        let _ = (app, event);
     });
 }

@@ -54,39 +54,42 @@ export default function Session({ pickId, onBack, onChanged }: Props) {
     bottom.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
 
+  // 判定 API が失敗したまとめ（再試行用。まとめは判定成功時にのみ保存される）
+  const [pendingSummary, setPendingSummary] = useState<string | null>(null);
+
+  const judge = (summary: string) =>
+    run(async () => {
+      const v = await api.submitSummary(pickId, summary);
+      setPendingSummary(null);
+      setVerdict(v);
+      setMessages(await api.messages(pickId));
+      setPick(await api.getPick(pickId));
+      if (!v.passed) setMode("chat");
+    });
+
   const submit = (text = input) => {
     const t = text.trim();
     if (!t || busy) return;
     setInput("");
-    // 送信直後に自分の発言を表示（API 失敗時もサーバ側に保存済み）
-    setMessages((m) => [
-      ...m,
-      { id: -Date.now(), role: "user", kind: mode === "summary" ? "summary" : "chat", content: t, created_at: "" },
-    ]);
     if (mode === "summary") {
-      run(async () => {
-        const v = await api.submitSummary(pickId, t);
-        setVerdict(v);
-        setMessages(await api.messages(pickId));
-        setPick(await api.getPick(pickId));
-        if (!v.passed) setMode("chat");
-      });
-    } else {
-      run(async () => {
-        setMessages(await api.send(pickId, t));
-      });
+      setPendingSummary(t);
+      judge(t);
+      return;
     }
+    setPendingSummary(null);
+    // 送信直後に自分の発言を表示（API 失敗時もサーバ側に保存済み）
+    setMessages((m) => [...m, { id: -Date.now(), role: "user", kind: "chat", content: t, created_at: "" }]);
+    run(async () => {
+      setMessages(await api.send(pickId, t));
+    });
   };
 
   const retry = () => {
+    if (pendingSummary) return judge(pendingSummary);
     if (messages.length === 0) return start();
-    const last = messages[messages.length - 1];
-    if (last.role === "user" && last.kind === "chat") {
-      run(async () => {
-        // 直前の発言への応答が失敗した場合は、同じ内容で再問い合わせ
-        setMessages(await api.send(pickId, "（先ほどの質問への回答をお願いします）"));
-      });
-    }
+    run(async () => {
+      setMessages(await api.retryReply(pickId));
+    });
   };
 
   if (!pick) return <div className="empty">{error ?? "読み込み中…"}</div>;
@@ -118,7 +121,13 @@ export default function Session({ pickId, onBack, onChanged }: Props) {
               <Markdown>{m.content}</Markdown>
             </div>
           ))}
-          {busy && <div className="msg model typing">考えています…</div>}
+          {pendingSummary && (
+            <div className="msg user summary">
+              <div className="msg-label">一言まとめ</div>
+              <p>{pendingSummary}</p>
+            </div>
+          )}
+          {busy && <div className="msg model typing">{pendingSummary ? "判定しています…" : "考えています…"}</div>}
           {verdict && (
             <div className={`verdict ${verdict.passed ? "pass" : "retry"}`}>
               <strong>{verdict.passed ? "🎉 パス！今日の学習は完了です" : "もう一歩。対話を続けてから再提出しましょう"}</strong>

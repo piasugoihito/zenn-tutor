@@ -159,7 +159,7 @@ pub fn score_candidates(mut cands: Vec<Candidate>, s: &Settings, exclude: &HashS
 
     // 手持ち知識との「橋渡し」になる語
     let bridge_rules = [
-        rule("Django/Flutter との接点", r"django|flutter|dart|riverpod|provider|freezed|dio|simplejwt|jwt|postgres", 3.0),
+        rule("Django/Flutter との接点", r"django|flutter|\bdart\b|riverpod|freezed|\bdio\b|simplejwt|jwt|postgres", 3.0),
         rule("抽象概念の比較", r"比較|違い|対応|置き換え|移行|乗り換え|から学ぶ|vs\.?", 1.5),
     ];
     // 設計・ベストプラクティス系
@@ -171,17 +171,21 @@ pub fn score_candidates(mut cands: Vec<Candidate>, s: &Settings, exclude: &HashS
     ];
     // 難易度不足
     let too_easy = [
-        rule("入門すぎ", r"入門|初心者|初学者|はじめて|初めて|始め方|超基礎|基礎の基礎|チュートリアル|hello\s*world|環境構築|インストール|セットアップ手順|やってみた|触ってみた|試してみた", -4.0),
+        rule("入門すぎ", r"入門|初心者|初学者|はじめて|初めて|始め方|超基礎|基礎の基礎|チュートリアル|hello\s*world|環境構築|インストール|セットアップ手順|やってみた|触ってみた|試してみた", -8.0),
     ];
     // 尖りすぎ・ポエム
     let too_niche = [
-        rule("個別バグ修正ログ", r"エラー|error|解決|ハマった|ハマり|詰まった|遭遇|不具合|バグ|直し方|対処|うまくいかない|できない|trouble", -3.0),
-        rule("ポエム・雑記", r"ポエム|振り返り|退職|転職|入社|感想|雑記|日記|備忘録|キャリア|年収|反省|所感|参加レポ|登壇", -3.0),
+        rule("個別バグ修正ログ", r"エラー|error|解決|ハマった|ハマり|詰まった|遭遇|不具合|バグ|直し方|対処|うまくいかない|できない|trouble", -6.0),
+        rule("ポエム・雑記", r"ポエム|振り返り|退職|転職|入社|感想|雑記|日記|備忘録|キャリア|年収|反省|所感|参加レポ|登壇", -6.0),
     ];
+
+    // 「エラーハンドリング設計」のような設計記事を個別バグ修正ログと誤判定しないための除去
+    let error_design = Regex::new(r"(?i)エラー\s*(ハンドリング|処理|設計|境界)|error\s*(handling|boundar)").unwrap();
 
     let now = chrono::Local::now().fixed_offset();
 
     for c in cands.iter_mut() {
+        let title_for_penalty = error_design.replace_all(&c.title, "").to_string();
         let title = &c.title;
         let body = &c.description;
         let mut score = 0.0;
@@ -209,10 +213,17 @@ pub fn score_candidates(mut cands: Vec<Candidate>, s: &Settings, exclude: &HashS
             reasons.push(format!("複数トピック +{bonus:.1}"));
         }
 
+        // キーワードに1つも掛からない記事は「無関係」として除外
+        let relevant = !reasons.is_empty();
+
         let mut apply = |rules: &[Rule], title_only: bool, cap: f64| {
             let mut sub = 0.0;
             for r in rules {
-                let hit = r.re.is_match(title) || (!title_only && r.re.is_match(body));
+                let hit = if title_only {
+                    r.re.is_match(&title_for_penalty)
+                } else {
+                    r.re.is_match(title) || r.re.is_match(body)
+                };
                 if hit {
                     sub += r.weight;
                     reasons.push(format!("{} {:+.1}", r.label, r.weight));
@@ -223,8 +234,8 @@ pub fn score_candidates(mut cands: Vec<Candidate>, s: &Settings, exclude: &HashS
         apply(&bridge_rules, false, 4.5);
         apply(&design_rules, false, 5.0);
         // 減点はタイトルで判定（本文冒頭の「エラー」等の言及まで減点すると良記事を落とすため）
-        apply(&too_easy, true, 6.0);
-        apply(&too_niche, true, 6.0);
+        apply(&too_easy, true, 8.0);
+        apply(&too_niche, true, 8.0);
 
         // 本文が極端に短い記事は薄い可能性
         if body.chars().count() < 80 {
@@ -239,7 +250,7 @@ pub fn score_candidates(mut cands: Vec<Candidate>, s: &Settings, exclude: &HashS
             }
         }
 
-        c.score = score;
+        c.score = if relevant { score } else { f64::MIN };
         c.reasons = reasons;
     }
 
@@ -431,12 +442,42 @@ mod tests {
             ),
         ];
         let top = score_candidates(cands, &s, &HashSet::new());
+        for c in &top {
+            println!("{} {:.1} {:?}", c.title, c.score, c.reasons);
+        }
         assert_eq!(top[0].title, "Flutter 経験者のための React 状態管理設計ガイド");
         assert!(top.iter().all(|c| !c.title.contains("入門")));
+        assert!(top.iter().all(|c| !c.title.contains("遭遇")));
+    }
+
+    #[test]
+    fn error_handling_design_is_not_penalized() {
+        let s = Settings::default();
+        let cands = vec![cand("Next.js のエラーハンドリング設計パターン", "Error Boundary の設計を整理する。", &["nextjs"])];
+        assert_eq!(score_candidates(cands, &s, &HashSet::new()).len(), 1);
+    }
+
+    #[test]
+    fn unrelated_is_excluded() {
+        let s = Settings::default();
+        let cands = vec![cand("Rust の所有権を理解する", "借用チェッカーの話。", &["rust"])];
+        assert!(score_candidates(cands, &s, &HashSet::new()).is_empty());
     }
 
     #[test]
     fn clean_text_strips_html() {
         assert_eq!(clean_text("<p>a &amp; b</p><script>x</script>"), "a & b");
+    }
+
+    /// 実際の Zenn RSS で1次選抜を確認する: cargo test live_preview -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_preview() {
+        let s = Settings { candidates: 10, ..Settings::default() };
+        let cands = tauri::async_runtime::block_on(fetch_feeds(&s.topics)).unwrap();
+        println!("fetched {}", cands.len());
+        for c in score_candidates(cands, &s, &HashSet::new()) {
+            println!("{:5.1}  {}  {:?}\n       {:?}", c.score, c.title, c.topics, c.reasons);
+        }
     }
 }
