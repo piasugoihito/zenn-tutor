@@ -49,7 +49,7 @@ export default function App() {
   );
 
   return (
-    <div className="app">
+    <div className={`app ${route.name === "session" ? "in-session" : ""}`}>
       <aside className="sidebar">
         <div className="brand">
           <span className="brand-mark">Z</span>

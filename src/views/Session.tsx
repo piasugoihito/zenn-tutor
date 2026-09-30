@@ -10,6 +10,7 @@ interface Props {
 }
 
 const QUICK = ["ここが分からない", "例えて", "Dartでいうと？", "Djangoでいうと？"];
+const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
 
 export default function Session({ pickId, onBack, onChanged }: Props) {
   const [pick, setPick] = useState<Pick | null>(null);
@@ -19,6 +20,8 @@ export default function Session({ pickId, onBack, onChanged }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<Verdict | null>(null);
+  // スマホでは記事の概要を畳んで会話の表示領域を確保する
+  const [infoOpen, setInfoOpen] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
 
   const run = async (fn: () => Promise<void>) => {
@@ -97,32 +100,39 @@ export default function Session({ pickId, onBack, onChanged }: Props) {
 
   return (
     <div className="session">
-      <aside className="session-side">
-        <button className="link back" onClick={onBack}>← 戻る</button>
+      <aside className={`session-side ${infoOpen ? "open" : ""}`}>
+        <div className="side-head">
+          <button className="link back" onClick={onBack}>← 戻る</button>
+          <button className="link side-toggle" aria-expanded={infoOpen} onClick={() => setInfoOpen((v) => !v)}>
+            {infoOpen ? "概要を閉じる ▲" : "記事の概要 ▼"}
+          </button>
+        </div>
         <h2>{pick.title}</h2>
-        <ol className="bridge small">
-          {pick.bridge.map((l, i) => (
-            <li key={i}>{l}</li>
-          ))}
-        </ol>
-        <p className="muted small">{pick.summary}</p>
-        <button onClick={() => openUrl(pick.url)}>記事を開く ↗</button>
-        <div className="howto small muted">
-          <p>AI の問いかけに自分の言葉で答えていきましょう。分からなければ遠慮なく「例えて」「Dartでいうと？」と聞いてOK。</p>
-          <p>最後に「一言まとめ」を提出し、パスが出たら今日の学習は完了です。</p>
+        <div className="side-body">
+          <ol className="bridge small">
+            {pick.bridge.map((l, i) => (
+              <li key={i}>{l}</li>
+            ))}
+          </ol>
+          <p className="muted small">{pick.summary}</p>
+          <button onClick={() => openUrl(pick.url)}>記事を開く ↗</button>
+          <div className="howto small muted">
+            <p>AI の問いかけに自分の言葉で答えていきましょう。分からなければ遠慮なく「例えて」「Dartでいうと？」と聞いてOK。</p>
+            <p>最後に「一言まとめ」を提出し、パスが出たら今日の学習は完了です。</p>
+          </div>
         </div>
       </aside>
 
-      <section className="chat">
+      <section className="chat-pane">
         <div className="chat-log">
           {messages.map((m) => (
-            <div key={m.id} className={`msg ${m.role} ${m.kind}`}>
+            <div key={m.id} className={`msg ${m.role} kind-${m.kind}`}>
               {m.kind === "summary" && <div className="msg-label">一言まとめ</div>}
               <Markdown>{m.content}</Markdown>
             </div>
           ))}
           {pendingSummary && (
-            <div className="msg user summary">
+            <div className="msg user kind-summary">
               <div className="msg-label">一言まとめ</div>
               <p>{pendingSummary}</p>
             </div>
@@ -168,8 +178,12 @@ export default function Session({ pickId, onBack, onChanged }: Props) {
                 value={input}
                 placeholder={
                   mode === "summary"
-                    ? "この記事を一言でいうとどういうこと？ 何のためのものか・具体例（Django/Flutterでいうと等）も添えて"
-                    : "自分の言葉で答えてみよう（⌘+Enter で送信）"
+                    ? isMobile
+                      ? "一言でいうと？ 目的・具体例も添えて"
+                      : "この記事を一言でいうとどういうこと？ 何のためのものか・具体例（Django/Flutterでいうと等）も添えて"
+                    : isMobile
+                      ? "自分の言葉で答えてみよう"
+                      : "自分の言葉で答えてみよう（⌘+Enter で送信）"
                 }
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {

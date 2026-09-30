@@ -358,6 +358,21 @@ textarea {
 .session-side p {
   margin: 0;
 }
+.side-head {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.side-toggle {
+  display: none;
+}
+.side-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
 .howto {
   border-top: 1px solid var(--border);
   padding-top: 12px;
@@ -366,7 +381,7 @@ textarea {
   margin-top: 6px;
 }
 
-.chat {
+.chat-pane {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -379,6 +394,10 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+/* 会話が増えても各発言を縮めない（縮むと本文が吹き出しからあふれて前後の発言と重なる） */
+.chat-log > * {
+  flex-shrink: 0;
 }
 .msg {
   max-width: 82%;
@@ -401,6 +420,20 @@ textarea {
 .msg code {
   font-size: 0.9em;
 }
+.msg ul,
+.msg ol {
+  margin: 0.3em 0;
+  padding-left: 1.4em;
+}
+.msg img {
+  max-width: 100%;
+}
+.msg table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
 .msg.user {
   align-self: flex-end;
   background: var(--user-bubble);
@@ -412,10 +445,10 @@ textarea {
   align-self: flex-start;
   border-bottom-left-radius: 4px;
 }
-.msg.summary {
+.msg.kind-summary {
   background: var(--ok);
 }
-.msg.verdict {
+.msg.kind-verdict {
   background: var(--ok-soft);
 }
 .msg-label {
@@ -481,6 +514,9 @@ textarea {
   display: flex;
   gap: 10px;
   align-items: flex-end;
+}
+.composer-input button {
+  white-space: nowrap;
 }
 .completed-bar {
   border-top: 1px solid var(--border);
@@ -654,19 +690,45 @@ textarea {
   .session {
     flex-direction: column;
   }
+  .app.in-session .sidebar {
+    display: none; /* 対話中は「← 戻る」で戻れるので下部タブを隠して会話の領域を広げる */
+  }
   .session-side {
     width: 100%;
-    max-height: 32vh;
+    flex-shrink: 0;
     border-right: none;
     border-bottom: 1px solid var(--border);
-    padding: 12px 16px;
-    gap: 8px;
+    padding: 6px 16px 10px;
+    gap: 2px;
   }
-  .session-side .bridge,
+  .session-side.open {
+    max-height: 60%;
+  }
+  .side-toggle {
+    display: inline;
+    font-size: 13px;
+  }
+  .session-side h2 {
+    font-size: 15px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .session-side.open h2 {
+    display: block;
+  }
+  .session-side:not(.open) .side-body {
+    display: none;
+  }
+  .side-body {
+    gap: 8px;
+    padding-top: 6px;
+  }
   .howto {
     display: none;
   }
-  .chat {
+  .chat-pane {
     min-height: 0;
   }
   .chat-log {
@@ -678,8 +740,36 @@ textarea {
   .composer {
     padding: 8px 12px 10px;
   }
+  .composer-top {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  /* クイック返答は折り返さず横スクロール1行 */
+  .quick {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin: 0 -12px;
+    padding: 0 12px;
+  }
+  .quick::-webkit-scrollbar {
+    display: none;
+  }
+  .mode button,
+  .quick button {
+    flex-shrink: 0;
+    white-space: nowrap;
+    padding: 4px 12px;
+  }
   .composer-input textarea {
     font-size: 16px; /* iOS/Android のフォーカス時ズームを防ぐ */
+    height: 72px;
+    resize: none;
+  }
+  .composer-input button {
+    padding: 10px 16px;
   }
 
   .grid {
@@ -702,6 +792,8 @@ textarea {
   padding-top: 32px;
   background: var(--bg);
 }
-.android .sidebar {
-  padding-bottom: 20px;
+.android .sidebar,
+.android .app.in-session .composer,
+.android .app.in-session .completed-bar {
+  padding-bottom: 20px; /* ジェスチャーナビゲーションバーと重ならないように */
 }
