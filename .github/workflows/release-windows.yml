@@ -1,0 +1,66 @@
+# v* タグの push で Windows 版をビルドし、GitHub Releases に公開する。
+# インストール済みのアプリは Releases の latest.json を見て自動アップデートする。
+name: Release (Windows)
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: タグと package.json のバージョンが一致するか確認
+        shell: pwsh
+        run: |
+          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ("v$v" -ne "${{ github.ref_name }}") {
+            throw "タグ ${{ github.ref_name }} と package.json のバージョン $v が一致しません"
+          }
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+
+      - name: 型チェック
+        run: npx tsc --noEmit
+
+      - name: ユニットテスト
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: ビルドして Releases に公開
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: ZennTutor ${{ github.ref_name }}
+          releaseBody: |
+            初回は `ZennTutor_*_x64-setup.exe` をダウンロードしてインストールしてください。
+            以降はアプリがトレイ常駐中に自動でアップデートされます。
+          releaseDraft: false
+          prerelease: false
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
+          args: --config src-tauri/tauri.release.conf.json

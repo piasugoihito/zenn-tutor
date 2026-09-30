@@ -1,6 +1,6 @@
 # ZennTutor
 
-**毎朝 Zenn から「今日のあなたに効く1本」だけを厳選し、AI チューターとの対話で理解まで導く学習アプリ（macOS / Android）。**
+**毎朝 Zenn から「今日のあなたに効く1本」だけを厳選し、AI チューターとの対話で理解まで導く学習アプリ（Windows / macOS / Android）。**
 
 情報過多な技術記事を「多読」するのをやめ、1日15〜20分の対話で1つの概念を自分の言葉にする——そのための学習基盤です。
 
@@ -46,12 +46,17 @@ Zenn トピック別 RSS ──▶ 1次選抜（ルールベース・API呼び�
 | OS | ファイル |
 | --- | --- |
 | macOS（Apple Silicon） | `ZennTutor_x.y.z_aarch64.dmg` |
+| Windows 10 / 11（x64） | `ZennTutor_x.y.z_x64-setup.exe` |
 | Android（8.0 以降 / arm64・armv7） | `ZennTutor_x.y.z_android.apk` |
 
 > **macOS で「開発元を検証できません」と表示される場合**
 > 未署名のビルドでは macOS の警告が出ます。アプリケーションフォルダへコピーしたあと、次のどちらかを行ってください。
 > - Finder で ZennTutor を右クリックし「開く」を選ぶ
 > - ターミナルで `xattr -cr /Applications/ZennTutor.app` を実行する
+
+> **Windows でインストールする場合**
+> 未署名のため、初回起動時に SmartScreen の「Windows によって PC が保護されました」が表示されます。「詳細情報」→「実行」で起動できます。
+> インストールは初回の1回だけです。以降はアプリが自動でアップデートされます（[自動アップデート](#自動アップデートwindows) を参照）。
 
 > **Android でインストールする場合**
 > Google Play 以外からの配布なので、APK を開くと「提供元不明のアプリ」の許可を求められます。ブラウザ（またはファイルアプリ）にインストールを許可してから進めてください。
@@ -113,51 +118,62 @@ npm run tauri dev     # 開発モード
 npm run tauri build   # 配布用ビルド（src-tauri/target/release/bundle/ に出力）
 ```
 
-### Windows（exe / msi）
+### Windows（exe）— GitHub Actions で自動ビルド・配布
 
-Windows 版は Windows 実機でビルドします（macOS からのクロスビルドは Tauri では実験的扱いのため使いません）。
+Windows 版は手元ではビルドせず、GitHub Actions（`.github/workflows/release-windows.yml`）で作ります。
+Windows 側は **最初に1回インストールしたら、あとは待つだけ** です。
 
-必要なもの:
-
-1. [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) — インストーラーで「C++ によるデスクトップ開発」を選択
-2. WebView2 ランタイム — Windows 10（1803 以降）/ 11 には標準で入っています
-3. [Rust](https://rustup.rs/) — 既定の `x86_64-pc-windows-msvc` ツールチェーンのままで OK
-4. Node.js 20 以上、Git
-
-PowerShell で:
-
-```powershell
-git clone https://github.com/piasugoihito/zenn-tutor.git
-cd zenn-tutor
-npm ci
-
-npm run tauri dev                          # まず開発モードで動作確認
-npm run tauri build                        # インストーラー（NSIS の exe と MSI）を作成
-npm run tauri build -- --bundles nsis      # exe インストーラーだけ作る場合
+```
+開発機（Mac）                 GitHub Actions（windows-latest）            Windows 実機
+npm run release  ──tag push──▶ 型チェック → cargo test → exe ビルド ──▶ Releases に公開
+  （v0.1.1 等）                   → 署名付き latest.json を作成             │
+                                                                            ▼
+                                            トレイ常駐中のアプリが1時間ごとに確認し、
+                                            新しい版を無音でインストールして再起動
 ```
 
-出力先:
+#### リリース手順（開発機）
 
-| 種類 | パス |
+```bash
+npm run release   # = npm version patch && git push --follow-tags
+```
+
+`package.json` のバージョンが上がり（`tauri.conf.json` は `package.json` のバージョンを参照）、`v0.1.1` のようなタグが push されてビルドが始まります。
+マイナー／メジャーを上げるときは `npm version minor && git push --follow-tags` のようにします。
+進行状況は GitHub の **Actions** タブ、成果物は **Releases** で確認できます（15分前後）。
+
+#### 初回セットアップ（Windows 実機・1回だけ）
+
+1. [Releases](../../releases/latest) から `ZennTutor_x.y.z_x64-setup.exe` をダウンロードして実行します（管理者権限は不要。ユーザー単位でインストールされます）。
+2. SmartScreen が出たら「詳細情報」→「実行」。
+3. 起動後、**設定 → 自動起動** が ON になっていることを確認します（ログイン時にトレイ常駐で起動）。
+
+#### 自動アップデート（Windows）
+
+- アプリは起動1分後と、その後1時間ごとに `releases/latest/download/latest.json` を確認します。
+- 新しい版があれば、**ウィンドウを閉じてトレイ常駐している間に** ダウンロードし、署名を検証して無音でインストール・再起動します。対話の途中で再起動することはありません。
+- すぐに更新したいときは、トレイメニューの「アップデートを確認」を選びます（ウィンドウ表示中でも実行されます）。
+- 開発ビルド（`npm run tauri dev`）では自動アップデートは動きません。
+
+#### 署名鍵（アップデートの改ざん防止）
+
+更新ファイルは Tauri の署名鍵で署名され、アプリは `tauri.conf.json` の `plugins.updater.pubkey` で検証します。
+
+| 置き場所 | 内容 |
 | --- | --- |
-| インストーラー（exe） | `src-tauri\target\release\bundle\nsis\ZennTutor_x.y.z_x64-setup.exe` |
-| インストーラー（msi） | `src-tauri\target\release\bundle\msi\ZennTutor_x.y.z_x64_en-US.msi` |
-| 実行ファイル単体 | `src-tauri\target\release\zenn-tutor.exe`（WebView2 がある環境ならそのまま起動可） |
+| 開発機 `~/.tauri/zenn-tutor.key` / `zenn-tutor.key.password` | 秘密鍵とパスワード（**リポジトリには入れない**。パスワードマネージャ等にもバックアップ推奨） |
+| GitHub Secrets `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | CI 用の同じ鍵とパスワード |
 
-補足:
+> **鍵を失うと、インストール済みのアプリへアップデートを配信できなくなります**（新しい鍵で署名した版は検証に失敗するため、各 PC で手動の再インストールが必要）。
 
-- 未署名のため、初回起動時に SmartScreen の「Windows によって PC が保護されました」が表示されます。「詳細情報」→「実行」で起動できます。
-- MSI の作成に失敗する場合は、Windows の「オプション機能」で **VBSCRIPT** を有効にするか、`--bundles nsis` で exe だけを作成してください。
-- 自動起動（ログイン時にトレイ常駐）はリリースビルドでのみ登録されます。`tauri dev` では登録されません。
+#### 手元の Windows でビルドする場合（任意）
 
-Windows 実機で確認すること:
+C++ Build Tools（「C++ によるデスクトップ開発」）、Rust、Node.js 20 以上、Git を入れて:
 
-- [ ] `cargo test`（`src-tauri` で実行）が通る
-- [ ] トレイアイコンが表示され、左クリックでウィンドウが開く／メニューの「今すぐスカウト」「終了」が動く
-- [ ] ウィンドウを閉じてもトレイに常駐する
-- [ ] 設定の「自動起動」ON で、再ログイン後にウィンドウを出さずトレイ常駐で起動する（インストール版で確認）
-- [ ] 二重起動すると既存のウィンドウが前面に出る
-- [ ] データが `%APPDATA%\dev.zenntutor.app\zenntutor.sqlite3` に保存される
+```powershell
+npm ci
+npm run tauri build -- --bundles nsis   # → src-tauri\target\release\bundle\nsis\
+```
 
 ### Android（APK）
 
@@ -202,9 +218,12 @@ src/                     フロントエンド（React）
   views/History.tsx      履歴
   views/Memos.tsx        理解メモ
   views/Settings.tsx     設定
+.github/workflows/       Windows 版の自動ビルド・Releases 公開
+src-tauri/tauri.release.conf.json  CI 用の追加設定（NSIS・更新ファイル作成）
 src-tauri/gen/android/   Android プロジェクト（tauri android init で生成）
 src-tauri/src/
   lib.rs                 コマンド・スケジューラ・トレイ・自動起動（トレイと自動起動はデスクトップのみ）
+  updater.rs             自動アップデート（デスクトップのみ）
   scout.rs               RSS 取得・1次選抜スコアリング・2次選抜
   tutor.rs               対話・理解度判定
   prompts.rs             プロファイルとプロンプト

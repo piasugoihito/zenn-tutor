@@ -4,6 +4,8 @@ mod prompts;
 mod scout;
 mod settings;
 mod tutor;
+#[cfg(desktop)]
+mod updater;
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -347,8 +349,9 @@ fn show_main(app: &AppHandle) {
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "ZennTutor を開く", true, None::<&str>)?;
     let scout_item = MenuItem::with_id(app, "scout", "今すぐスカウト", true, None::<&str>)?;
+    let update_item = MenuItem::with_id(app, "update", "アップデートを確認", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "終了", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &scout_item, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &scout_item, &update_item, &quit])?;
 
     TrayIconBuilder::with_id("main")
         .icon(tauri::include_image!("icons/tray.png"))
@@ -361,6 +364,18 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
             "scout" => {
                 let app = app.clone();
                 tauri::async_runtime::spawn(async move { maybe_scout(&app, true).await });
+            }
+            "update" => {
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    let msg = match updater::install_if_available(&app).await {
+                        Ok(_) => format!("ZennTutor — 最新版です（v{}）", app.package_info().version),
+                        Err(e) => format!("ZennTutor — アップデート確認に失敗: {e}"),
+                    };
+                    if let Some(tray) = app.tray_by_id("main") {
+                        let _ = tray.set_tooltip(Some(msg));
+                    }
+                });
             }
             "quit" => app.exit(0),
             _ => {}
@@ -381,6 +396,7 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![HIDDEN_ARG])))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .on_window_event(|window, event| {
             // ウィンドウを閉じても終了せずトレイに常駐
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -407,6 +423,7 @@ pub fn run() {
                 if !std::env::args().any(|a| a == HIDDEN_ARG) {
                     show_main(&handle);
                 }
+                updater::spawn(handle.clone());
             }
             // モバイルではアプリ起動中のみタイマーが動く（開いた時点で当日分を用意）
             spawn_scheduler(handle);
